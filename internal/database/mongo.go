@@ -8,6 +8,8 @@ import (
 	"log"
 	"time"
 
+	"excelDisclaimer/internal/models"
+
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
@@ -55,6 +57,35 @@ func (m *MongoDB) InsertRecord(collectionName string, record interface{}) error 
 		return fmt.Errorf("failed to insert record: %w", err)
 	}
 	return nil
+}
+
+// UpsertRecord inserts or updates a record based on Number field
+func (m *MongoDB) UpsertRecord(collectionName string, record models.ProductRecord) (bool, error) {
+	collection := m.Database.Collection(collectionName)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// Use Number field as unique identifier
+	filter := bson.M{"Number": record.Number}
+	
+	// Replace entire document if exists, insert if not
+	opts := options.Replace().SetUpsert(true)
+	
+	result, err := collection.ReplaceOne(ctx, filter, record, opts)
+	if err != nil {
+		return false, fmt.Errorf("failed to upsert record with Number %s: %w", record.Number, err)
+	}
+
+	// Return true if this was an update (not a new insert)
+	wasUpdate := result.MatchedCount > 0
+	
+	if wasUpdate {
+		log.Printf("Updated existing record with Number: %s", record.Number)
+	} else {
+		log.Printf("Inserted new record with Number: %s", record.Number)
+	}
+	
+	return wasUpdate, nil
 }
 
 func (m *MongoDB) ListCollections() ([]string, error) {

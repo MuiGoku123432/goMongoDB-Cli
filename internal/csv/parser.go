@@ -1,6 +1,7 @@
 package csv
 
 import (
+	"bytes"
 	"encoding/csv"
 	"fmt"
 	"io"
@@ -22,27 +23,20 @@ func NewParser(filename string) *Parser {
 }
 
 func (p *Parser) ParseRecords() ([]models.ProductRecord, error) {
-	file, err := os.Open(p.filename)
+	// Read entire file to handle BOM
+	data, err := os.ReadFile(p.filename)
 	if err != nil {
-		return nil, fmt.Errorf("failed to open CSV file: %w", err)
-	}
-	defer file.Close()
-
-	// First, inspect the CSV headers
-	reader := csv.NewReader(file)
-	headers, err := reader.Read()
-	if err != nil {
-		return nil, fmt.Errorf("failed to read CSV headers: %w", err)
+		return nil, fmt.Errorf("failed to read CSV file: %w", err)
 	}
 
-	log.Printf("CSV Headers found: %v", headers)
-	log.Printf("Expected headers (case-insensitive): [product, number, description, verbal disclaimer]")
+	// Remove BOM if present
+	data = removeBOM(data)
 
-	// Reset file to beginning for parsing
-	file.Seek(0, 0)
+	// Create reader from cleaned data
+	reader := bytes.NewReader(data)
 
 	// Parse using case-insensitive approach
-	records, err := p.parseFlexible(file)
+	records, err := p.parseFlexible(reader)
 	if err != nil {
 		return nil, err
 	}
@@ -55,14 +49,35 @@ func (p *Parser) ParseRecords() ([]models.ProductRecord, error) {
 	return records, nil
 }
 
-func (p *Parser) parseFlexible(file *os.File) ([]models.ProductRecord, error) {
-	reader := csv.NewReader(file)
-	reader.FieldsPerRecord = -1
-	reader.TrimLeadingSpace = true
+// removeBOM removes the UTF-8 BOM if present
+func removeBOM(data []byte) []byte {
+	// UTF-8 BOM is 0xEF, 0xBB, 0xBF
+	if len(data) >= 3 && data[0] == 0xEF && data[1] == 0xBB && data[2] == 0xBF {
+		log.Println("BOM detected and removed from CSV file")
+		return data[3:]
+	}
+	return data
+}
 
-	headers, err := reader.Read()
+func (p *Parser) parseFlexible(reader io.Reader) ([]models.ProductRecord, error) {
+	csvReader := csv.NewReader(reader)
+	csvReader.FieldsPerRecord = -1
+	csvReader.TrimLeadingSpace = true
+	csvReader.LazyQuotes = true  // Allow quotes in unquoted fields for messy CSVs
+
+	headers, err := csvReader.Read()
 	if err != nil {
 		return nil, fmt.Errorf("failed to read CSV headers: %w", err)
+	}
+
+	log.Printf("CSV Headers found: %v", headers)
+	log.Printf("Expected headers (case-insensitive): [product, number, description, verbal disclaimer]")
+
+	// Only process first 4 columns, ignore any extras
+	maxColumns := 4
+	if len(headers) > maxColumns {
+		log.Printf("WARNING: CSV has %d columns, but only processing first %d", len(headers), maxColumns)
+		headers = headers[:maxColumns]
 	}
 
 	// Create a map of lowercase headers to their indices
@@ -97,7 +112,7 @@ func (p *Parser) parseFlexible(file *os.File) ([]models.ProductRecord, error) {
 	rowNum := 1
 
 	for {
-		row, err := reader.Read()
+		row, err := csvReader.Read()
 		if err == io.EOF {
 			break
 		}
@@ -105,6 +120,11 @@ func (p *Parser) parseFlexible(file *os.File) ([]models.ProductRecord, error) {
 			return nil, fmt.Errorf("failed to read CSV row %d: %w", rowNum+1, err)
 		}
 		rowNum++
+
+		// Limit row to first 4 columns if it has more
+		if len(row) > maxColumns {
+			row = row[:maxColumns]
+		}
 
 		record := models.ProductRecord{}
 
@@ -119,6 +139,7 @@ func (p *Parser) parseFlexible(file *os.File) ([]models.ProductRecord, error) {
 			record.Description = strings.TrimSpace(row[idx])
 		}
 		if idx, exists := headerMap["verbal disclaimer"]; exists && idx < len(row) {
+			// The disclaimer may contain commas, quotes will be handled by CSV reader
 			record.VerbalDisclaimer = strings.TrimSpace(row[idx])
 		}
 

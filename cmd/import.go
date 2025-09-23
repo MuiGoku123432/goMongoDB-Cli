@@ -48,33 +48,41 @@ func runImport(cmd *cobra.Command, args []string) error {
 	}
 	defer db.Close()
 
-	successCount := 0
+	insertCount := 0
+	updateCount := 0
 	skippedCount := 0
+	failedCount := 0
+	
 	for i, record := range records {
 		// Validate required fields
-		if record.Product == "" && record.Number == "" {
-			log.Printf("Skipping record %d: both Product and Number fields are empty", i+1)
-			log.Printf("  Raw data: Product='%s', Number='%s', Description='%s'", 
-				record.Product, record.Number, record.Description)
+		if record.Number == "" {
+			log.Printf("Skipping record %d: empty Number field (Product: %s)", i+1, record.Product)
 			skippedCount++
 			continue
 		}
+		
 		if record.Product == "" {
 			log.Printf("Warning: record %d has empty Product field (Number: %s)", i+1, record.Number)
 		}
-		if record.Number == "" {
-			log.Printf("Warning: record %d has empty Number field (Product: %s)", i+1, record.Product)
-		}
 
-		if err := db.InsertRecord(collection, record); err != nil {
-			log.Printf("Failed to insert record %d (Product: %s, Number: %s): %v", 
+		wasUpdate, err := db.UpsertRecord(collection, record)
+		if err != nil {
+			log.Printf("Failed to upsert record %d (Product: %s, Number: %s): %v", 
 				i+1, record.Product, record.Number, err)
+			failedCount++
 			continue
 		}
-		successCount++
 		
-		if successCount%100 == 0 {
-			log.Printf("Imported %d records...", successCount)
+		if wasUpdate {
+			updateCount++
+		} else {
+			insertCount++
+		}
+		
+		totalProcessed := insertCount + updateCount
+		if totalProcessed%100 == 0 {
+			log.Printf("Processed %d records (%d new, %d updated)...", 
+				totalProcessed, insertCount, updateCount)
 		}
 	}
 	
@@ -84,15 +92,23 @@ func runImport(cmd *cobra.Command, args []string) error {
 		log.Printf("  Expected: product, number, description, verbal disclaimer")
 	}
 
-	log.Printf("Successfully imported %d/%d records to %s.%s", successCount, len(records), dbName, collection)
+	log.Printf("\n=== Import Summary ===")
+	log.Printf("Total records in CSV: %d", len(records))
+	log.Printf("New records inserted: %d", insertCount)
+	log.Printf("Existing records updated: %d", updateCount) 
+	log.Printf("Records skipped: %d", skippedCount)
+	log.Printf("Records failed: %d", failedCount)
+	log.Printf("Collection: %s.%s", dbName, collection)
 	
-	if successCount > 0 {
-		log.Printf("Sample record structure:")
-		log.Printf("  Product: %s", records[0].Product)
-		log.Printf("  Number: %s", records[0].Number)
-		log.Printf("  Description: %s", records[0].Description)
-		log.Printf("  DisclaimerVerbiage: %s", records[0].VerbalDisclaimer)
-		log.Printf("  AutoSelect: %s", records[0].AutoSelect)
+	if insertCount > 0 || updateCount > 0 {
+		if len(records) > 0 {
+			log.Printf("\nSample record structure:")
+			log.Printf("  Product: %s", records[0].Product)
+			log.Printf("  Number: %s", records[0].Number)
+			log.Printf("  Description: %s", records[0].Description)
+			log.Printf("  DisclaimerVerbiage: %s", records[0].VerbalDisclaimer)
+			log.Printf("  AutoSelect: %s", records[0].AutoSelect)
+		}
 	}
 	
 	return nil
