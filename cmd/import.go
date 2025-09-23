@@ -49,15 +49,21 @@ func runImport(cmd *cobra.Command, args []string) error {
 	defer db.Close()
 
 	successCount := 0
+	skippedCount := 0
 	for i, record := range records {
 		// Validate required fields
-		if record.Product == "" {
-			log.Printf("Skipping record %d: empty Product field", i+1)
+		if record.Product == "" && record.Number == "" {
+			log.Printf("Skipping record %d: both Product and Number fields are empty", i+1)
+			log.Printf("  Raw data: Product='%s', Number='%s', Description='%s'", 
+				record.Product, record.Number, record.Description)
+			skippedCount++
 			continue
 		}
+		if record.Product == "" {
+			log.Printf("Warning: record %d has empty Product field (Number: %s)", i+1, record.Number)
+		}
 		if record.Number == "" {
-			log.Printf("Skipping record %d: empty Number field", i+1)
-			continue
+			log.Printf("Warning: record %d has empty Number field (Product: %s)", i+1, record.Product)
 		}
 
 		if err := db.InsertRecord(collection, record); err != nil {
@@ -70,6 +76,12 @@ func runImport(cmd *cobra.Command, args []string) error {
 		if successCount%100 == 0 {
 			log.Printf("Imported %d records...", successCount)
 		}
+	}
+	
+	if skippedCount > 0 {
+		log.Printf("WARNING: Skipped %d records due to empty fields", skippedCount)
+		log.Printf("Check that your CSV column headers match (case-insensitive):")
+		log.Printf("  Expected: product, number, description, verbal disclaimer")
 	}
 
 	log.Printf("Successfully imported %d/%d records to %s.%s", successCount, len(records), dbName, collection)

@@ -4,7 +4,9 @@ import (
 	"encoding/csv"
 	"fmt"
 	"io"
+	"log"
 	"os"
+	"strings"
 
 	"excelDisclaimer/internal/models"
 
@@ -26,14 +28,23 @@ func (p *Parser) ParseRecords() ([]models.ProductRecord, error) {
 	}
 	defer file.Close()
 
-	var records []models.ProductRecord
-	decoder, err := csvutil.NewDecoder(csv.NewReader(file))
+	// First, inspect the CSV headers
+	reader := csv.NewReader(file)
+	headers, err := reader.Read()
 	if err != nil {
-		return nil, fmt.Errorf("failed to create CSV decoder: %w", err)
+		return nil, fmt.Errorf("failed to read CSV headers: %w", err)
 	}
-	
-	if err := decoder.Decode(&records); err != nil {
-		return nil, fmt.Errorf("failed to decode CSV: %w", err)
+
+	log.Printf("CSV Headers found: %v", headers)
+	log.Printf("Expected headers (case-insensitive): [product, number, description, verbal disclaimer]")
+
+	// Reset file to beginning for parsing
+	file.Seek(0, 0)
+
+	// Parse using case-insensitive approach
+	records, err := p.parseFlexible(file)
+	if err != nil {
+		return nil, err
 	}
 
 	// Set default AutoSelect value for all records
@@ -41,6 +52,80 @@ func (p *Parser) ParseRecords() ([]models.ProductRecord, error) {
 		records[i].AutoSelect = ""
 	}
 
+	return records, nil
+}
+
+func (p *Parser) parseFlexible(file *os.File) ([]models.ProductRecord, error) {
+	reader := csv.NewReader(file)
+	reader.FieldsPerRecord = -1
+	reader.TrimLeadingSpace = true
+
+	headers, err := reader.Read()
+	if err != nil {
+		return nil, fmt.Errorf("failed to read CSV headers: %w", err)
+	}
+
+	// Create a map of lowercase headers to their indices
+	headerMap := make(map[string]int)
+	for i, header := range headers {
+		normalized := strings.TrimSpace(strings.ToLower(header))
+		headerMap[normalized] = i
+		log.Printf("  Column %d: '%s' (normalized: '%s')", i, header, normalized)
+	}
+
+	// Check for required columns
+	requiredColumns := map[string]string{
+		"product":           "Product",
+		"number":            "Number",
+		"description":       "Description",
+		"verbal disclaimer": "DisclaimerVerbiage",
+	}
+
+	missingColumns := []string{}
+	for csvName, fieldName := range requiredColumns {
+		if _, exists := headerMap[csvName]; !exists {
+			missingColumns = append(missingColumns, fmt.Sprintf("%s (for field %s)", csvName, fieldName))
+		}
+	}
+
+	if len(missingColumns) > 0 {
+		log.Printf("WARNING: Missing expected columns: %v", missingColumns)
+		log.Printf("This may result in empty fields in the imported data")
+	}
+
+	var records []models.ProductRecord
+	rowNum := 1
+
+	for {
+		row, err := reader.Read()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, fmt.Errorf("failed to read CSV row %d: %w", rowNum+1, err)
+		}
+		rowNum++
+
+		record := models.ProductRecord{}
+
+		// Map columns flexibly
+		if idx, exists := headerMap["product"]; exists && idx < len(row) {
+			record.Product = strings.TrimSpace(row[idx])
+		}
+		if idx, exists := headerMap["number"]; exists && idx < len(row) {
+			record.Number = strings.TrimSpace(row[idx])
+		}
+		if idx, exists := headerMap["description"]; exists && idx < len(row) {
+			record.Description = strings.TrimSpace(row[idx])
+		}
+		if idx, exists := headerMap["verbal disclaimer"]; exists && idx < len(row) {
+			record.VerbalDisclaimer = strings.TrimSpace(row[idx])
+		}
+
+		records = append(records, record)
+	}
+
+	log.Printf("Parsed %d records from CSV", len(records))
 	return records, nil
 }
 
