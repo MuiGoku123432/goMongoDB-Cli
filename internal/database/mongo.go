@@ -60,6 +60,7 @@ func (m *MongoDB) InsertRecord(collectionName string, record interface{}) error 
 }
 
 // UpsertRecord inserts or updates a record based on Number field
+// Preserves existing fields that are not part of the core CSV import
 func (m *MongoDB) UpsertRecord(collectionName string, record models.ProductRecord) (bool, error) {
 	collection := m.Database.Collection(collectionName)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -68,21 +69,62 @@ func (m *MongoDB) UpsertRecord(collectionName string, record models.ProductRecor
 	// Use Number field as unique identifier
 	filter := bson.M{"Number": record.Number}
 	
-	// Replace entire document if exists, insert if not
-	opts := options.Replace().SetUpsert(true)
+	// First, check if record exists to preserve extra fields
+	var existingDoc bson.M
+	err := collection.FindOne(ctx, filter).Decode(&existingDoc)
 	
-	result, err := collection.ReplaceOne(ctx, filter, record, opts)
+	wasUpdate := false
+	var finalDoc bson.M
+	
+	if err == nil {
+		// Record exists - preserve extra fields
+		wasUpdate = true
+		
+		// Convert new record to bson.M for merging
+		newDocBytes, err := bson.Marshal(record)
+		if err != nil {
+			return false, fmt.Errorf("failed to marshal new record: %w", err)
+		}
+		
+		var newDoc bson.M
+		if err := bson.Unmarshal(newDocBytes, &newDoc); err != nil {
+			return false, fmt.Errorf("failed to unmarshal new record: %w", err)
+		}
+		
+		// Start with existing document
+		finalDoc = existingDoc
+		
+		// Update core fields from CSV import
+		coreFields := []string{"Product", "Number", "Description", "DisclaimerVerbiage", "AutoSelect"}
+		for _, field := range coreFields {
+			if value, exists := newDoc[field]; exists {
+				finalDoc[field] = value
+			}
+		}
+		
+		log.Printf("Updated existing record with Number: %s (preserved %d extra fields)", 
+			record.Number, len(existingDoc)-len(coreFields))
+	} else if err == mongo.ErrNoDocuments {
+		// Record doesn't exist - use new record as-is
+		newDocBytes, err := bson.Marshal(record)
+		if err != nil {
+			return false, fmt.Errorf("failed to marshal new record: %w", err)
+		}
+		
+		if err := bson.Unmarshal(newDocBytes, &finalDoc); err != nil {
+			return false, fmt.Errorf("failed to unmarshal new record: %w", err)
+		}
+		
+		log.Printf("Inserted new record with Number: %s", record.Number)
+	} else {
+		return false, fmt.Errorf("failed to check existing record with Number %s: %w", record.Number, err)
+	}
+	
+	// Replace entire document with merged data
+	opts := options.Replace().SetUpsert(true)
+	_, err = collection.ReplaceOne(ctx, filter, finalDoc, opts)
 	if err != nil {
 		return false, fmt.Errorf("failed to upsert record with Number %s: %w", record.Number, err)
-	}
-
-	// Return true if this was an update (not a new insert)
-	wasUpdate := result.MatchedCount > 0
-	
-	if wasUpdate {
-		log.Printf("Updated existing record with Number: %s", record.Number)
-	} else {
-		log.Printf("Inserted new record with Number: %s", record.Number)
 	}
 	
 	return wasUpdate, nil

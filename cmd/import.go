@@ -106,7 +106,7 @@ func runImport(cmd *cobra.Command, args []string) error {
 			log.Printf("  Product: %s", records[0].Product)
 			log.Printf("  Number: %s", records[0].Number)
 			log.Printf("  Description: %s", records[0].Description)
-			log.Printf("  DisclaimerVerbiage: %s", records[0].VerbalDisclaimer)
+			log.Printf("  DisclaimerVerbiage: %s", records[0].DisclaimerVerbiage)
 			log.Printf("  AutoSelect: %s", records[0].AutoSelect)
 		}
 	}

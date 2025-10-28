@@ -4,7 +4,7 @@ type ProductRecord struct {
 	Product           string `csv:"product" bson:"Product"`
 	Number            string `csv:"number" bson:"Number"`
 	Description       string `csv:"description" bson:"Description"`
-	VerbalDisclaimer  string `csv:"verbal disclaimer" bson:"DisclaimerVerbiage"`
+	DisclaimerVerbiage string `csv:"verbal disclaimer" bson:"DisclaimerVerbiage"`
 	AutoSelect        string `bson:"AutoSelect"`
 }
 

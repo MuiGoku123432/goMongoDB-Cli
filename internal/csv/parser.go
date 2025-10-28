@@ -140,7 +140,7 @@ func (p *Parser) parseFlexible(reader io.Reader) ([]models.ProductRecord, error)
 		}
 		if idx, exists := headerMap["verbal disclaimer"]; exists && idx < len(row) {
 			// The disclaimer may contain commas, quotes will be handled by CSV reader
-			record.VerbalDisclaimer = strings.TrimSpace(row[idx])
+			record.DisclaimerVerbiage = strings.TrimSpace(row[idx])
 		}
 
 		records = append(records, record)
