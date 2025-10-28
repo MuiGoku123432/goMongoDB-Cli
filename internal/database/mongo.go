@@ -91,7 +91,7 @@ func (m *MongoDB) UpsertRecord(collectionName string, record models.ProductRecor
 			return false, fmt.Errorf("failed to unmarshal new record: %w", err)
 		}
 		
-		// Start with existing document
+		// Start with existing document to preserve all extra fields
 		finalDoc = existingDoc
 		
 		// Update core fields from CSV import
@@ -102,8 +102,25 @@ func (m *MongoDB) UpsertRecord(collectionName string, record models.ProductRecor
 			}
 		}
 		
+		// Count extra fields (excluding _id and core fields)
+		extraFieldCount := 0
+		for key := range existingDoc {
+			if key != "_id" {
+				isCore := false
+				for _, coreField := range coreFields {
+					if key == coreField {
+						isCore = true
+						break
+					}
+				}
+				if !isCore {
+					extraFieldCount++
+				}
+			}
+		}
+		
 		log.Printf("Updated existing record with Number: %s (preserved %d extra fields)", 
-			record.Number, len(existingDoc)-len(coreFields))
+			record.Number, extraFieldCount)
 	} else if err == mongo.ErrNoDocuments {
 		// Record doesn't exist - use new record as-is
 		newDocBytes, err := bson.Marshal(record)
