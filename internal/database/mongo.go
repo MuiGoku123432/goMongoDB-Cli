@@ -94,8 +94,8 @@ func (m *MongoDB) UpsertRecord(collectionName string, record models.ProductRecor
 		// Start with existing document to preserve all extra fields
 		finalDoc = existingDoc
 		
-		// Update core fields from CSV import
-		coreFields := []string{"Product", "Number", "Description", "DisclaimerVerbiage", "AutoSelect"}
+		// Update core fields from CSV import (only the 4 CSV fields)
+		coreFields := []string{"Product", "Number", "Description", "DisclaimerVerbiage"}
 		for _, field := range coreFields {
 			if value, exists := newDoc[field]; exists {
 				finalDoc[field] = value
